@@ -1,0 +1,34 @@
+package javagames.gameobjects;
+
+
+import java.awt.RenderingHints;
+import java.io.IOException;
+
+import javax.imageio.ImageIO;
+import javagames.util.Vector2f;
+
+public class Background extends Sprite {
+
+	private int scale;
+	
+	public Background(){
+		super();
+		init();
+	}
+	
+	public int getScale(){ return scale;}
+	
+	public void init(){
+		position = new Vector2f(26.8f,-30.32f);
+		scale = 2;
+		try { 
+			sprite = ImageIO.read(this.getClass().getResource("/ground/world1.png"));
+			sprite = scaleWithGraphics(RenderingHints.VALUE_INTERPOLATION_BILINEAR, sprite, scale);
+		}
+		catch( IOException e){
+			e.printStackTrace();
+			sprite = null;
+		}
+	}
+	
+}

@@ -1,0 +1,431 @@
+package javagames.main;
+
+import javagames.gameobjects.*;
+import javagames.util.*;
+
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.event.KeyEvent;
+import java.awt.image.BufferedImage;
+import java.io.*;
+import java.util.LinkedList;
+
+
+public class WorldSpace extends SimpleFramework {
+	
+	private OneShotEvent shootLaser;
+	private OneShotEvent deathScream;
+	private LoopEvent ambient;
+	private LoopEvent lowHealth;
+	private OneShotEvent laserHit;
+	private OneShotEvent victory;
+	private byte[] ambientBytes;
+	private byte[] shootLaserBytes;
+	private byte[] deathScreamBytes;
+	private byte[] lowHealthBytes;
+	private byte[] laserHitBytes;
+	private byte[] victoryBytes;
+	
+    private float charSpeed;
+	private Vector2f cam;
+    private Point point;
+    private Player player;
+    private Vector2f playerWorldPos;
+    private Background background;
+    private int level;
+	private int offsetMaxX;
+	private int offsetMaxY;
+	private int offsetMinX;
+	private int offsetMinY;
+	private LinkedList<Bullet> lasers;
+	private LinkedList<Bullet> deadLasers;
+	private LinkedList<Enemy> enemies;
+	private LinkedList<Enemy> deadEnemies;
+
+    private WorldSpace() {
+        appBackground = Color.WHITE;
+        appBorder = Color.LIGHT_GRAY;
+        appFont = new Font("Courier New", Font.PLAIN, 14);
+        appBorderScale = 1.0f;
+        appFPSColor = Color.BLACK;
+        appWidth = 1280;
+        appHeight = 720;
+        appMaintainRatio = true;
+        appSleep = 10L;
+        appTitle = "SuperNova";
+        appWorldWidth = 16.0f;
+        appWorldHeight = 9.0f;
+        viewFPS = true;
+    }
+
+    @Override
+    protected void initialize() {
+        level = 1;
+        lasers = new LinkedList<>();
+        deadLasers = new LinkedList<>();
+        enemies = new LinkedList<>();
+        deadEnemies = new LinkedList<>();
+        initBackground();
+        initPlayer();
+        InputStream in = ResourceLoader.load(WorldSpace.class,
+        		"./assets/ambient.wav","asdf");
+		ambientBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/deathScream.wav", "asdf");
+		deathScreamBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/shootLaser.wav", "asdf");
+		shootLaserBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/lowHealth.wav", "asdf");
+		lowHealthBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/victory.wav", "asdf");
+		victoryBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/laserHit.wav", "asdf");
+		laserHitBytes = readBytes(in);
+		shutDownClips();
+		shootLaser = new OneShotEvent(new BlockingClip(shootLaserBytes));
+		shootLaser.initialize();
+		laserHit = new OneShotEvent(new BlockingClip(laserHitBytes));
+		laserHit.initialize();
+		deathScream = new OneShotEvent(new BlockingClip(deathScreamBytes));
+		deathScream.initialize();
+		lowHealth = new LoopEvent(new BlockingClip(lowHealthBytes));
+		lowHealth.initialize();
+		victory = new OneShotEvent(new BlockingClip(victoryBytes));
+		victory.initialize();
+		ambient = new LoopEvent(new BlockingClip(ambientBytes));
+		ambient.initialize();
+		
+        ambient.fire();
+		cam = new Vector2f(appWidth/2,appHeight/2);
+		offsetMaxX = background.getSprite().getWidth() - appWidth;
+		offsetMaxY = background.getSprite().getHeight() - appHeight;
+		offsetMinX = 0;
+		offsetMinY = 0;
+        super.initialize();
+        
+        enemies.add(new Enemy(player.position));
+    }
+
+    protected void initBackground(){
+    	background = new Background();
+    }
+    
+    protected void initPlayer(){
+    	player = new Player();
+        charSpeed = 500.0f;
+        //INITIAL PLAYER POSITION
+        player.position.x = -3.0f;
+        player.position.y = -61.0f;
+
+    }
+
+    private byte[] readBytes(InputStream in) {
+		try {
+			BufferedInputStream buf = new BufferedInputStream(in);
+			ByteArrayOutputStream out = new ByteArrayOutputStream();
+			int read;
+			while ((read = buf.read()) != -1) {
+				out.write(read);
+			}
+			in.close();
+			return out.toByteArray();
+		} catch (IOException ex) {
+			ex.printStackTrace();
+			return null;
+		}
+	}
+
+	private void shutDownClips() {
+		if (ambient != null)
+			ambient.shutDown();
+		if (shootLaser != null)
+			shootLaser.shutDown();
+		if (laserHit != null)
+			laserHit.shutDown();
+		if (deathScream != null)
+			deathScream.shutDown();
+		if (lowHealth != null)
+			lowHealth.shutDown();
+		if (victory != null)
+			victory.shutDown();
+	}
+	
+    @Override
+    protected void processInput(float delta) {
+        super.processInput(delta);
+        point = mouse.getPosition();
+        
+        	if(mouse.buttonDownOnce(1)){
+        		if(player.getEquippedWeapon().getCharge() != player.getEquippedWeapon().getCapacity()){
+        			player.shoot();
+        			shootLaser.fire();
+        			
+        			//reuse objects for better performance
+        			if(deadLasers.isEmpty()){
+        				System.out.println("creating new live laser");
+        				lasers.add(new Bullet(player.getEquippedWeapon().createSpread(player.getAngle()), player.position.x, player.position.y,
+        						player.getEquippedWeapon().barrelAngle(), player.getEquippedWeapon().barrelLoc()));
+        			} else {
+        				System.out.println("Removing from deadLasers and adding to live lasers");
+        				lasers.add(deadLasers.getLast());
+        				deadLasers.removeLast();
+        				lasers.getLast().reset(player.getEquippedWeapon().createSpread(player.getAngle()), player.position.x, player.position.y,
+        						player.getEquippedWeapon().barrelAngle(), player.getEquippedWeapon().barrelLoc());
+        				
+        			}
+        		}
+        	}
+        
+            //player movement
+            //up and left
+            if (keyboard.keyDown(KeyEvent.VK_W) && keyboard.keyDown(KeyEvent.VK_A)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(-charSpeed / 2 * delta, charSpeed / 2 * delta);
+            }
+            //up and right
+            else if (keyboard.keyDown(KeyEvent.VK_W) && keyboard.keyDown(KeyEvent.VK_D)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(charSpeed / 2 * delta, charSpeed / 2 * delta);
+            }
+            //down and left
+            else if (keyboard.keyDown(KeyEvent.VK_S) && keyboard.keyDown(KeyEvent.VK_A)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(-charSpeed / 2 * delta, -charSpeed / 2 * delta);
+            }
+            //down and right
+            else if (keyboard.keyDown(KeyEvent.VK_S) && keyboard.keyDown(KeyEvent.VK_D)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(charSpeed / 2 * delta, -charSpeed / 2 * delta);
+            }
+            //no diagonals
+            else {
+                //up
+                if (keyboard.keyDown(KeyEvent.VK_W)) {
+                    player.isWalking = true;
+                    player.velocity.y = charSpeed * delta;
+                }
+                //down
+                else if (keyboard.keyDown(KeyEvent.VK_S)) {
+                    player.isWalking = true;
+                    player.velocity.y = -charSpeed * delta;
+                } else {
+                    player.velocity.y = 0.0f;
+                }
+                //left
+                if (keyboard.keyDown(KeyEvent.VK_A)) {
+                    player.isWalking = true;
+                    player.velocity.x = -charSpeed * delta;
+                }
+                //right
+                else if (keyboard.keyDown(KeyEvent.VK_D)) {
+                    player.isWalking = true;
+                    player.velocity.x = charSpeed * delta;
+                } else {
+                    player.velocity.x = 0.0f;
+                }
+                
+                
+            }
+            
+            if(keyboard.keyDownOnce(KeyEvent.VK_Q)){
+            	System.out.println(player.position.toString());
+            }
+            
+            if(player.velocity.x == 0.0f && player.velocity.y == 0.0f){
+            	player.isWalking = false;	
+            }
+            
+            playerWorldPos = getViewportTransform().mul(player.position);
+    		cam.x = playerWorldPos.x - appWidth/2;
+    		cam.y = playerWorldPos.y - appHeight/2;
+    		if( cam.x > offsetMaxX)
+    			cam.x = offsetMaxX;
+    		else if( cam.x < offsetMinX)
+    			cam.x = offsetMinX;
+    		if( cam.y > offsetMaxY)
+    			cam.y = offsetMaxY;
+    		else if( cam.y < offsetMinY)
+    			cam.y = offsetMinY;
+
+
+            if (keyboard.keyDownOnce(KeyEvent.VK_F1)) {
+                viewFPS = !viewFPS;
+            }
+        }
+
+    @Override
+    protected void updateObjects(float delta) {
+        player.updateWorld(delta, getReverseViewportTransform().mul(new Vector2f(point.x+cam.x, point.y+cam.y)));
+
+        updateEnemies(delta);
+        updateLasers(delta);
+
+        super.updateObjects(delta);
+        
+        checkCollisions(delta);
+    }
+    
+    protected void updateLasers(float delta){
+    	for(int i=0;i<lasers.size();++i){
+    		Bullet laser = lasers.get(i);
+    		BoundingCircle laserbc = laser.getBoundingCircle();
+        	laser.updateWorld(delta);
+        	if(laser.position.x < -8.0f || laser.position.y > 4.5f 
+        			|| laser.position.x > 61.0f || laser.position.y < -65.0f){
+        		deadLasers.add(lasers.get(i));
+        		lasers.remove(i);
+        	}
+        	
+        	if (laserbc.intersect(laserbc.getCenter(), laserbc.getRadius().y - laserbc.getRadius().x, player.getBoundingCircle().getCenter(), 
+        			player.getBoundingCircle().getRadius().y - player.getBoundingCircle().getRadius().x)) {
+        		player.health--;
+        		if(player.health==0)
+        			deathScream.fire();
+        		else
+        			laserHit.fire();
+        		if(player.health==1)
+        			lowHealth.fire();
+        		deadLasers.add(lasers.get(i));
+        		lasers.remove(i);
+        		
+        	}
+        	
+        	//Checking enemy collisions
+            if (!enemies.isEmpty()) {
+                for (int j = 0; j < enemies.size(); j++) {
+                	if(Math.abs(laser.position.x-enemies.get(j).position.x)<1.0f &&
+                			Math.abs(laser.position.y-enemies.get(j).position.y)<1.0f){
+                			
+                		BoundingCircle enemy = enemies.get(j).getBoundingCircle();
+                		
+                    
+                		if (laserbc.intersect(laserbc.getCenter(), laserbc.getRadius().y - laserbc.getRadius().x, enemy.getCenter(), enemy.getRadius().y - enemy.getRadius().x)) {
+                			//checking again accounts for bullet hitting two enemies at once
+                			if (!(i>lasers.size()-1)) {
+                				deadLasers.add(lasers.get(i));
+                				lasers.remove(i);
+                			}
+                			if (!enemies.isEmpty()) {
+                				enemies.get(j).health--;
+                				if(enemies.get(j).health==0)
+                					deathScream.fire();
+                				else
+                					laserHit.fire();
+                			}
+                		}
+                	}
+                }
+
+            }
+    	}
+    	if(deadLasers.size()>100){
+    		System.out.println("deadLasers has become too large, halving size");
+    		for(int i=0;i<50;++i){
+    			deadLasers.removeFirst();
+    		}		
+    	}
+    	
+    }
+    protected void updateEnemies(float delta){
+        for(int i=0;i<enemies.size();++i){
+        	Enemy enemy = enemies.get(i);
+        	enemy.updateWorld(delta, player.position);
+        	if(enemy.inRange){
+        		//Enemy shooting
+        		if(enemy.canShoot && enemy.shoot()){
+        			if(deadLasers.isEmpty()){
+        				lasers.add(new Bullet(enemy.getEquippedWeapon().createSpread(enemy.getAngle()), enemy.position.x, enemy.position.y,
+        						enemy.getEquippedWeapon().barrelAngle(), enemy.getEquippedWeapon().barrelLoc()));
+        			} else {
+        				deadLasers.getLast().reset(enemy.getEquippedWeapon().createSpread(enemy.getAngle()), enemy.position.x, enemy.position.y,
+        						enemy.getEquippedWeapon().barrelAngle(), enemy.getEquippedWeapon().barrelLoc());
+        				lasers.add(deadLasers.getLast());
+        				deadLasers.removeLast();
+        			}
+        		}
+        	}
+    		if(Math.abs(player.position.x - enemies.get(i).position.x) < 1.0f &&
+    				Math.abs(player.position.y - enemies.get(i).position.y) < 1.0f){
+    			BoundingCircle bc = player.getBoundingCircle();
+    			BoundingCircle enemybc = enemy.getBoundingCircle();
+    			//player
+    			if (bc.intersect(bc.getCenter(), bc.getRadius().y - bc.getRadius().x, enemybc.getCenter(), enemybc.getRadius().y - enemybc.getRadius().x)) {
+
+    			}
+    		}
+    		if(enemy.health<=0){
+    			deadEnemies.add(enemies.get(i));
+    			enemies.remove(i);
+    		}
+        }	
+    }
+
+    protected void checkCollisions(float delta){
+    	 LinkedList<BoundingBox> collisions = 
+    
+    	
+    }
+    @Override
+    protected void render(Graphics g) {
+    	Graphics2D g2d = (Graphics2D)g;
+    	g2d.translate((int)-cam.x, (int)-cam.y);
+    	background.render(g2d, getViewportTransform());
+    	player.render(g, getViewportTransform());
+       	
+    	renderEnemies(g);
+    	renderLasers(g);
+    	renderCollisions(g);
+ 
+    	drawUI(g);
+        super.render(g);
+    }
+
+
+    private void drawUI(Graphics g){
+    	g.setColor(new Color(0,0,0,100));
+    	g.fillRect((int)cam.x,(int)cam.y, appWidth, 20);
+    	g.fillRect((int)cam.x, (int)cam.y+appHeight-40, appWidth, 20);
+    	g.setColor(Color.green);
+    	for(int i=0;i<player.health;i++){
+    		g.drawRect((int)cam.x+i*20,(int)cam.y, 20, 20);
+    	}
+    	
+    	g.drawRect((int)cam.x+(appWidth/2)-50,(int)cam.y, 100, 20);
+    	for(int i=0;i<player.getEquippedWeapon().getCharge();++i){
+    		g.fillRect((int)cam.x+(appWidth/2)-50+(i*20),(int)cam.y, 20, 20);
+    	}
+    	
+    }
+    
+    private void renderLasers(Graphics g){
+    	for(int i=0;i<lasers.size();++i){
+    		lasers.get(i).render(g, getViewportTransform());
+    	}
+    }
+    
+    private void renderEnemies(Graphics g){
+    	for(int i=0;i<enemies.size();++i){
+    		enemies.get(i).render(g, getViewportTransform());
+    	}
+    }
+    
+    private void renderCollisions(Graphics g){
+
+    	
+    }
+
+
+    @Override
+    protected void terminate() {
+        super.terminate();
+        shutDownClips();
+    }
+
+    public static void main(String[] args) {
+        launchApp(new WorldSpace());
+    }
+}

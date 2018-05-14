@@ -1,0 +1,750 @@
+package javagames.main;
+
+import javagames.gameobjects.*;
+import javagames.gameobjects.Boss.Attack;
+import javagames.util.*;
+import java.awt.*;
+import java.awt.event.KeyEvent;
+import java.awt.image.BufferedImage;
+import java.io.*;
+import java.util.LinkedList;
+
+import javax.imageio.ImageIO;
+
+
+public class WorldSpace extends SimpleFramework {
+	
+	public enum Actor{ PLAYER, MINION, BOSS }
+	private OneShotEvent shootLaser;
+	private OneShotEvent deathScream;
+	private LoopEvent ambient;
+	private LoopEvent lowHealth;
+	private OneShotEvent laserHit;
+	private OneShotEvent victory;
+	private OneShotEvent bossDeath;
+	private byte[] bossDeathBytes;
+	private byte[] ambientBytes;
+	private byte[] shootLaserBytes;
+	private byte[] deathScreamBytes;
+	private byte[] lowHealthBytes;
+	private byte[] laserHitBytes;
+	private byte[] victoryBytes;
+	private Level levelData;
+	private float stringTime;
+	private SpriteObject healthSprite;
+	private BufferedImage logo;
+	
+	private float root2 = (float)Math.sqrt(2);
+    private float charSpeed;
+	private Vector2f cam;
+    private Point point;
+    private Player player;
+    private Vector2f playerWorldPos;
+    private Background background;
+    private int level;
+	private int offsetMaxX;
+	private int offsetMaxY;
+	private int offsetMinX;
+	private int offsetMinY;
+	private LinkedList<Bullet> lasers;
+	private LinkedList<Bullet> deadLasers;
+	private LinkedList<Enemy> enemies;
+	private LinkedList<Enemy> deadEnemies;
+	private boolean bossSign;
+	private boolean startSign;
+	private boolean bridgeSign;
+	private boolean bossFight;
+	private boolean inGame;
+	private boolean endGame;
+	
+	private NumberUtils numUtils;
+
+    private WorldSpace() {
+        appBackground = Color.WHITE;
+        appBorder = Color.LIGHT_GRAY;
+        appFont = new Font("Courier New", Font.PLAIN, 14);
+        appBorderScale = 1.0f;
+        appFPSColor = Color.BLACK;
+        appWidth = 1280;
+        appHeight = 720;
+        appMaintainRatio = true;
+        appSleep = 10L;
+        appTitle = "SuperNova";
+        appWorldWidth = 16.0f;
+        appWorldHeight = 9.0f;
+        viewFPS = true;
+    }
+
+    @Override
+    protected void initialize() {
+    	healthSprite = new SpriteObject();
+    	try{
+    		healthSprite.sprite = ImageIO.read(this.getClass().getResource("/effects/heart.png"));
+    		healthSprite.sprite = healthSprite.scaleWithGraphics(RenderingHints.VALUE_INTERPOLATION_BILINEAR, healthSprite.sprite,6);
+    		
+    	}
+    	catch(IOException e){
+    		e.printStackTrace();
+            healthSprite.sprite = null;
+    	}
+    	
+    	try{
+    		logo = ImageIO.read(this.getClass().getResource("/logo.png"));
+    	}catch(IOException e){
+    		e.printStackTrace();
+    		logo = null;
+    	}
+        level = 1;
+        levelData = new Level(level);
+        lasers = new LinkedList<>();
+        deadLasers = new LinkedList<>();
+        enemies = new LinkedList<>();
+        deadEnemies = new LinkedList<>();
+        numUtils = new NumberUtils();
+        bossSign = startSign = bridgeSign = bossFight = false;
+        inGame = false;
+        endGame = false;
+        stringTime = 0.0f;
+        initBackground();
+        initPlayer();
+        InputStream in = ResourceLoader.load(WorldSpace.class,
+        		"./assets/sounds/ambient.wav","/sounds/ambient.wav");
+		ambientBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/sounds/bossDeath.wav", "/sounds/bossDeath.wav");
+		bossDeathBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/sounds/deathScream.wav", "/sounds/deathScream.wav");
+		deathScreamBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/sounds/shootLaser.wav", "/sounds/shootLaser.wav");
+		shootLaserBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/sounds/lowHealth.wav", "/sounds/lowHealth.wav");
+		lowHealthBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/sounds/victory.wav", "/sounds/victory.wav");
+		victoryBytes = readBytes(in);
+		in = ResourceLoader.load(WorldSpace.class,
+				"./assets/sounds/laserHit.wav", "/sounds/laserHit.wav");
+		laserHitBytes = readBytes(in);
+		shutDownClips();
+		bossDeath = new OneShotEvent(new BlockingClip(bossDeathBytes));
+		bossDeath.initialize();
+		shootLaser = new OneShotEvent(new BlockingClip(shootLaserBytes));
+		shootLaser.initialize();
+		laserHit = new OneShotEvent(new BlockingClip(laserHitBytes));
+		laserHit.initialize();
+		deathScream = new OneShotEvent(new BlockingClip(deathScreamBytes));
+		deathScream.initialize();
+		lowHealth = new LoopEvent(new BlockingClip(lowHealthBytes));
+		lowHealth.initialize();
+		victory = new OneShotEvent(new BlockingClip(victoryBytes));
+		victory.initialize();
+		ambient = new LoopEvent(new BlockingClip(ambientBytes));
+		ambient.initialize();
+		
+        ambient.fire();
+		cam = new Vector2f(appWidth/2,appHeight/2);
+		offsetMaxX = background.getSprite().getWidth() - appWidth;
+		offsetMaxY = background.getSprite().getHeight() - appHeight;
+		offsetMinX = 0;
+		offsetMinY = 0;
+        super.initialize();
+        disableCursor();
+        
+        //preempt deadEnemies for fast object manipulation
+        for(int i=0;i<20;++i){
+        	deadEnemies.add(new Enemy(player.position));
+        }
+
+    }
+
+    protected void initBackground(){
+    	background = new Background(level);
+    }
+    
+    protected void initPlayer(){
+    	player = new Player();
+        charSpeed = 300.0f;
+        /*
+        player.position.x = 22.0f;
+        player.position.y = 0.0f;
+        */
+        //INITIAL PLAYER POSITION
+        player.position = levelData.playerStart;
+        
+
+    }
+    
+    protected void reset(){
+    	levelData = new Level(level);
+    	player.position = levelData.playerStart;
+    	background = new Background(level);
+    	
+		offsetMaxX = background.getSprite().getWidth() - appWidth;
+		offsetMaxY = background.getSprite().getHeight() - appHeight;
+		offsetMinX = 0;
+		offsetMinY = 0;
+		
+    	enemies.clear();
+    	lasers.clear();
+    	
+    	if(level == 2){
+    		Boss tmpBoss = new Boss(new Vector2f(9.75f, -53.5f));
+    		tmpBoss.health = 35;
+    		enemies.add(tmpBoss);
+    	}
+        //preempt deadEnemies for fast object manipulation
+        for(int i=0;i<20;++i){
+        	deadEnemies.add(new Enemy(player.position));
+        }
+        
+    	
+    }
+
+    private byte[] readBytes(InputStream in) {
+		try {
+			BufferedInputStream buf = new BufferedInputStream(in);
+			ByteArrayOutputStream out = new ByteArrayOutputStream();
+			int read;
+			while ((read = buf.read()) != -1) {
+				out.write(read);
+			}
+			in.close();
+			return out.toByteArray();
+		} catch (IOException ex) {
+			ex.printStackTrace();
+			return null;
+		}
+	}
+
+    protected void disableCursor() {
+	      Toolkit tk = Toolkit.getDefaultToolkit();
+	      Image image = tk.createImage( "./assets/actors/cursor.png" );
+	      Point point = new Point( 0, 0 );
+	      String name = "CrossHair";
+	      Cursor cursor = tk.createCustomCursor( image, point, name );
+	      setCursor( cursor );
+	}
+    
+	private void shutDownClips() {
+		if( bossDeath != null)
+			bossDeath.shutDown();
+		if (ambient != null)
+			ambient.shutDown();
+		if (shootLaser != null)
+			shootLaser.shutDown();
+		if (laserHit != null)
+			laserHit.shutDown();
+		if (deathScream != null)
+			deathScream.shutDown();
+		if (lowHealth != null)
+			lowHealth.shutDown();
+		if (victory != null)
+			victory.shutDown();
+	}
+	
+    @Override
+    protected void processInput(float delta) {
+        super.processInput(delta);
+        point = mouse.getPosition();
+        
+        if(inGame){
+        	if(mouse.buttonDownOnce(1)){
+        		if(player.getEquippedWeapon().getCharge() != player.getEquippedWeapon().getCapacity()){
+        			player.shoot();
+        			shootLaser.fire();
+        			
+        			//reuse objects for better performance
+        			if(deadLasers.isEmpty()){
+        				lasers.add(new Bullet(player.getEquippedWeapon().createSpread(player.getAngle()), player.position.x, player.position.y,
+        						player.getEquippedWeapon().barrelAngle(), player.getEquippedWeapon().barrelLoc(), player.p));
+        			} else {
+        				lasers.add(deadLasers.getLast());
+        				deadLasers.removeLast();
+        				lasers.getLast().reset(player.getEquippedWeapon().createSpread(player.getAngle()), player.position.x, player.position.y,
+        						player.getEquippedWeapon().barrelAngle(), player.getEquippedWeapon().barrelLoc(), player.p);
+        				
+        			}
+        		}
+        	}
+        
+            //player movement
+            //up and left
+            if (keyboard.keyDown(KeyEvent.VK_W) && keyboard.keyDown(KeyEvent.VK_A)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(-charSpeed /root2 * delta, charSpeed / root2 * delta);
+            }
+            //up and right
+            else if (keyboard.keyDown(KeyEvent.VK_W) && keyboard.keyDown(KeyEvent.VK_D)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(charSpeed / root2 * delta, charSpeed / root2 * delta);
+            }
+            //down and left
+            else if (keyboard.keyDown(KeyEvent.VK_S) && keyboard.keyDown(KeyEvent.VK_A)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(-charSpeed / root2 * delta,-charSpeed / root2 * delta);
+            }
+            //down and right
+            else if (keyboard.keyDown(KeyEvent.VK_S) && keyboard.keyDown(KeyEvent.VK_D)) {
+                player.isWalking = true;
+                player.velocity = new Vector2f(charSpeed / root2 * delta, -charSpeed / root2 * delta);
+            }
+            //no diagonals
+            else {
+                //up
+                if (keyboard.keyDown(KeyEvent.VK_W)) {
+                    player.isWalking = true;
+                    player.velocity.y = charSpeed * delta;
+                }
+                //down
+                else if (keyboard.keyDown(KeyEvent.VK_S)) {
+                    player.isWalking = true;
+                    player.velocity.y = -charSpeed * delta;
+                } else {
+                    player.velocity.y = 0.0f;
+                }
+                //left
+                if (keyboard.keyDown(KeyEvent.VK_A)) {
+                    player.isWalking = true;
+                    player.velocity.x = -charSpeed * delta;
+                }
+                //right
+                else if (keyboard.keyDown(KeyEvent.VK_D)) {
+                    player.isWalking = true;
+                    player.velocity.x = charSpeed * delta;
+                } else {
+                    player.velocity.x = 0.0f;
+                }
+                
+                
+            }
+            
+            if(keyboard.keyDownOnce(KeyEvent.VK_Q)){
+            	player.health = 10;
+            }
+            
+            if(keyboard.keyDownOnce(KeyEvent.VK_E)){
+            	enemies.clear();
+            	player.position = new Vector2f(25.0f,-10.0f );
+            }
+            
+            if(keyboard.keyDownOnce(KeyEvent.VK_T)){
+            	System.out.println(player.position.toString());
+            }
+            
+            if(player.velocity.x == 0.0f && player.velocity.y == 0.0f){
+            	player.isWalking = false;	
+            }
+            
+            playerWorldPos = getViewportTransform().mul(player.position);
+    		cam.x = playerWorldPos.x - appWidth/2;
+    		cam.y = playerWorldPos.y - appHeight/2;
+    		if( cam.x > offsetMaxX)
+    			cam.x = offsetMaxX;
+    		else if( cam.x < offsetMinX)
+    			cam.x = offsetMinX;
+    		if( cam.y > offsetMaxY)
+    			cam.y = offsetMaxY;
+    		else if( cam.y < offsetMinY)
+    			cam.y = offsetMinY;
+
+
+            if (keyboard.keyDownOnce(KeyEvent.VK_F1)) {
+                viewFPS = !viewFPS;
+            }
+        }
+        else if(!endGame){
+        	if(keyboard.keyDownOnce(KeyEvent.VK_SPACE)){
+            	player.health = 4;
+        		inGame = true;
+        	}
+        }
+     }
+
+    @Override
+    protected void updateObjects(float delta) {
+    	
+    	if(inGame){
+    		if(player.health<=0){
+    			inGame = false;
+    			reset();
+    		}
+    		if(level == 2 && enemies.isEmpty()){
+    			inGame = false;
+    			
+    		}
+    		player.updateWorld(delta, getReverseViewportTransform().mul(new Vector2f(point.x+cam.x, point.y+cam.y)));
+    		healthSprite.position = cam;
+    		if(bossSign || startSign || bridgeSign){
+    			stringTime+=delta;
+    			if(stringTime>8.0f){
+    				bossSign = startSign = bridgeSign = false;
+    				stringTime=0.0f;
+    			}
+    		}
+       
+        updateEnemies(delta);
+        updateLasers(delta);
+
+        super.updateObjects(delta);
+        
+        checkCollisions(delta);
+    	}
+    }
+    
+    protected void updateLasers(float delta){
+    	for(int i=0;i<lasers.size();++i){
+    		Bullet laser = lasers.get(i);
+    		BoundingCircle laserbc = laser.getBoundingCircle();
+        	laser.updateWorld(delta);
+        	
+        	//worldBounds
+        	if(laser.position.x < -8.0f || laser.position.y > 4.5f 
+        			|| laser.position.x > 61.0f || laser.position.y < -65.0f){
+        		if( !(lasers.get(i) instanceof BigBullet))
+        			deadLasers.add(lasers.get(i));
+        		lasers.remove(i);
+        		
+        	}
+        	
+        	if (laserbc.intersect(laserbc.getCenter(), laserbc.getRadius().y - laserbc.getRadius().x, player.getBoundingCircle().getCenter(), 
+        			player.getBoundingCircle().getRadius().y - player.getBoundingCircle().getRadius().x)) {
+        		player.health--;
+        		if(player.health==0)
+        			deathScream.fire();
+        		else
+        			laserHit.fire();
+        		if(player.health==1)
+        			lowHealth.fire();
+        		if( !(lasers.get(i) instanceof BigBullet))
+        			deadLasers.add(lasers.get(i));
+        		lasers.remove(i);
+        		
+        	}
+        	
+        	//Checking enemy collisions
+            if (!enemies.isEmpty()) {
+                for (int j = 0; j < enemies.size(); j++) {
+                	if(Math.abs(laser.position.x-enemies.get(j).position.x)<1.0f &&
+                			Math.abs(laser.position.y-enemies.get(j).position.y)<1.0f){
+                			
+                		BoundingCircle enemy = enemies.get(j).getBoundingCircle();
+                		
+                    
+                		if (laserbc.intersect(laserbc.getCenter(), laserbc.getRadius().y - laserbc.getRadius().x, enemy.getCenter(), enemy.getRadius().y - enemy.getRadius().x)) {
+                			//checking again accounts for bullet hitting two enemies at once
+                			if (!(i>lasers.size()-1)) {
+                				if( !(lasers.get(i) instanceof BigBullet))
+                					deadLasers.add(lasers.get(i));
+                				lasers.remove(i);
+                			}
+                			if (!enemies.isEmpty()) {
+                				enemies.get(j).health--;
+                				if(enemies.get(j).health==0)
+                					deathScream.fire();
+                				else
+                					laserHit.fire();
+                			}
+                		}
+                	}
+                }
+
+            }
+    	}
+    	
+    	//trims deadLasers if it becomes too large
+    	if(deadLasers.size()>100){
+    		for(int i=0;i<50;++i){
+    			deadLasers.removeFirst();
+    		}		
+    	}
+    	
+    }
+    protected void updateEnemies(float delta){
+        for(int i=0;i<enemies.size();++i){
+        	Enemy enemy = enemies.get(i);
+        	enemy.updateWorld(delta, player.position);
+        	
+        	if(enemy.inRange){
+        		//Enemy shooting
+				if(bossFight && enemy.health<35 && level==1){
+					System.out.println("time to go to boss level");
+					inGame = false;
+					level++;
+					bossDeath.fire();
+					reset();
+				}
+        		if(enemy.canShoot && enemy.shoot()){
+        			shootLaser.fire();
+        			if(deadLasers.isEmpty()){
+        				if(enemy.p == Actor.BOSS){
+        					if(((Boss)enemy).attack == Attack.BIGBULLET )
+        						lasers.add(new BigBullet(enemy.getEquippedWeapon().createSpread(enemy.getAngle()), enemy.position.x, enemy.position.y,
+        								enemy.getEquippedWeapon().barrelAngle(), enemy.getEquippedWeapon().barrelLoc(), enemy.p));
+        					else if( ((Boss)enemy).attack == Attack.HOMINGLASER)
+        						lasers.add(new HomingBullet(enemy.getEquippedWeapon().createSpread(enemy.getAngle()), enemy.position.x, enemy.position.y,
+        								enemy.getEquippedWeapon().barrelAngle(), enemy.getEquippedWeapon().barrelLoc(), enemy.p));
+        					else
+        						lasers.add(new Bullet(enemy.getEquippedWeapon().createSpread(enemy.getAngle()), enemy.position.x, enemy.position.y,
+    	        						enemy.getEquippedWeapon().barrelAngle(), enemy.getEquippedWeapon().barrelLoc(), enemy.p));
+        				}
+        				else{
+	        				lasers.add(new Bullet(enemy.getEquippedWeapon().createSpread(enemy.getAngle()), enemy.position.x, enemy.position.y,
+	        						enemy.getEquippedWeapon().barrelAngle(), enemy.getEquippedWeapon().barrelLoc(), enemy.p));
+        				}
+        			} else {
+        				deadLasers.getLast().reset(enemy.getEquippedWeapon().createSpread(enemy.getAngle()), enemy.position.x, enemy.position.y,
+        						enemy.getEquippedWeapon().barrelAngle(), enemy.getEquippedWeapon().barrelLoc(), enemy.p);
+        				lasers.add(deadLasers.getLast());
+        				deadLasers.removeLast();
+        			}
+        		}
+        	}
+        	if(!enemies.isEmpty()){
+        		if(Math.abs(player.position.x - enemies.get(i).position.x) < 1.0f &&
+    				Math.abs(player.position.y - enemies.get(i).position.y) < 1.0f){
+        			BoundingCircle bc = player.getBoundingCircle();
+        			BoundingCircle enemybc = enemy.getBoundingCircle();
+        		}
+        	
+        		if(enemy.health<=0){
+        			deadEnemies.add(enemies.get(i));
+        			enemies.remove(i);
+        		}
+        	}
+        }	
+    }
+
+    protected void checkCollisions(float delta){
+    	 LinkedList<BoundingBox> collisions = levelData.getCollisions();
+         //Player collision w/ walls
+    	 BoundingCircle bc = player.getBoundingCircle();
+         for (int i = 0; i < collisions.size(); ++i) {
+             BoundingBox bb = collisions.get(i);
+             if (bc.intersect(bc.getCenter(), bc.getRadius().y - bc.getRadius().x, bb.getMin(), bb.getMax())) {
+                 player.position.x -= player.velocity.x * delta;
+                 player.position.y -= player.velocity.y * delta;
+             }
+             
+         }
+         
+         //triggers
+         LinkedList<Trigger> triggers = levelData.getTriggers();
+         for (int i = 0; i < triggers.size(); i++) {
+             BoundingBox bb = triggers.get(i);
+             if (bc.intersect(bc.getCenter(), bc.getRadius().y - bc.getRadius().x, bb.getMin(), bb.getMax()) 
+            		 && !triggers.get(i).triggered) {
+                 
+                 if(triggers.get(i).name.equals("enemy1")){
+                	 for(int j=0;j<3;++j){
+                		 if(deadEnemies.isEmpty()){
+                			 enemies.add(new Enemy(new Vector2f(numUtils.randomFloat(7.63f,15.2f ), numUtils.randomFloat(-63.97f, -61.0f))));
+                		 }else{
+                			 enemies.add(deadEnemies.getLast());
+                			 enemies.getLast().reset(new Vector2f(numUtils.randomFloat(7.63f,15.2f ), numUtils.randomFloat(-63.97f, -61.8f)));
+                			 deadEnemies.removeLast();
+                		 }
+                	 }
+                 }
+                 else if(triggers.get(i).name.equals("enemy2")){
+                	 for(int j=0;j<3;++j){
+                		 if(deadEnemies.isEmpty()){
+                			 enemies.add(new Enemy(new Vector2f(player.position.x+numUtils.randomFloat(8.0f,12.2f ), player.position.y+numUtils.randomFloat(-2.0f, 2.0f))));
+                		 }else{
+                			 enemies.add(deadEnemies.getLast());
+                			 enemies.getLast().reset(new Vector2f(player.position.x+numUtils.randomFloat(8.0f,12.2f ), player.position.y+numUtils.randomFloat(-2.0f, 2.0f)));
+                			 deadEnemies.removeLast();
+                		 }
+                	 }
+                	 
+                 }
+                 else if(triggers.get(i).name.equals("enemy3")){
+                	 for(int j=0;j<5;++j){
+                		 if(deadEnemies.isEmpty()){
+                			 enemies.add(new Enemy(new Vector2f(numUtils.randomFloat(54.0f,60.0f), numUtils.randomFloat(-48.0f, -39.0f))));
+                		 }else{
+                			 enemies.add(deadEnemies.getLast());
+                			 enemies.getLast().reset(new Vector2f(numUtils.randomFloat(54.0f,60.0f), numUtils.randomFloat(-48.0f, -39.0f)));
+                			 deadEnemies.removeLast();
+                		 }
+                	 }
+                	 
+                 }
+                 else if(triggers.get(i).name.equals("enemy4")){
+                	 for(int j=0;j<10;++j){
+                		 if(deadEnemies.isEmpty()){
+                			 enemies.add(new Enemy(new Vector2f(numUtils.randomFloat(21.0f,30.0f), numUtils.randomFloat(-54.0f, -45.0f))));
+                		 }else{
+                			 enemies.add(deadEnemies.getLast());
+                			 enemies.getLast().reset(new Vector2f(numUtils.randomFloat(21.0f,30.0f), numUtils.randomFloat(-54.0f, -45.0f)));
+                			 deadEnemies.removeLast();
+                		 }
+                	 }
+                	 
+                 }
+                 else if(triggers.get(i).name.equals("enemy5")){
+                	 for(int j=0;j<5;++j){
+                		 if(deadEnemies.isEmpty()){
+                			 enemies.add(new Enemy(new Vector2f(numUtils.randomFloat(14.0f,23.0f), numUtils.randomFloat(-42.0f, -31.0f))));
+                		 }else{
+                			 enemies.add(deadEnemies.getLast());
+                			 enemies.getLast().reset(new Vector2f(numUtils.randomFloat(14.0f,23.0f), numUtils.randomFloat(-42.0f, -31.0f)));
+                			 deadEnemies.removeLast();
+                		 }
+                	 }
+                	 
+                 }
+                 else if(triggers.get(i).name.equals("enemy6")){
+                	 for(int j=0;j<7;++j){
+                		 if(deadEnemies.isEmpty()){
+                			 enemies.add(new Enemy(new Vector2f(numUtils.randomFloat(23.0f,30.0f), numUtils.randomFloat(-25.0f, -21.0f))));
+                		 }else{
+                			 enemies.add(deadEnemies.getLast());
+                			 enemies.getLast().reset(new Vector2f(numUtils.randomFloat(23.0f,30.0f), numUtils.randomFloat(-25.0f, -21.0f)));
+                			 deadEnemies.removeLast();
+                		 }
+                	 }
+                	 
+                 }
+                 else if(triggers.get(i).name.equals("bossSign")){
+                	 bossSign = true;
+                	 if(enemies.isEmpty()){
+                		 System.out.println("Boss spawned");
+                		 enemies.add(new Boss(new Vector2f(54.7f, -9.0f)));
+                		 bossFight = true;
+                	 }else{
+                		 bossSign = false;
+                	 }
+                 }
+                 else if(triggers.get(i).name.equals("startSign")){
+                	startSign = true;
+                 }
+                 else if(triggers.get(i).name.equals("bridgeSign")){
+                	 bridgeSign = true;
+                 }
+                 triggers.get(i).triggered = true;
+             }
+         }
+    
+    	
+    }
+    @Override
+    protected void render(Graphics g) {
+    	Graphics2D g2d = (Graphics2D)g;
+
+		
+    	if(inGame){
+    		g.setColor(Color.BLACK);
+    		g.fillRect(0, 0, appWidth, appHeight);
+    		g2d.translate((int)-cam.x, (int)-cam.y);
+    		background.render(g2d, getViewportTransform());
+    		player.render(g, getViewportTransform());
+       	
+    		renderEnemies(g);
+    		renderLasers(g);
+    		renderDialogue(g);
+    	
+    	
+    	drawUI(g);
+        super.render(g);
+    		drawUI(g);
+    		super.render(g);
+    	}
+    	else{
+    		
+    		g.setColor(Color.black);
+			g.fillRect(0, 0, appWidth, appHeight);
+    		g.drawImage(logo, appWidth/2, appHeight/2, null);
+    		String str = "";
+    		if(player.health <= 0){
+    			str = "You are dead.";
+    		}
+    		else if(level == 2 && enemies.isEmpty()){
+    			str = "Zelroth has been defeated!!!";
+    			endGame = true;
+    		}
+    		else if(level == 2){
+    			str = "Zelroth has escaped to his lair!";
+    		}	
+    		else{
+    			str = "Press space to start";
+    		}
+			g.setColor(Color.red);
+			g.setFont(new Font("Courier New", Font.PLAIN, 26));
+			g.drawString(str, appWidth/2, appHeight/2);
+    		g.setFont(appFont);
+    	}
+    }
+
+
+    private void drawUI(Graphics g){
+    	g.setColor(new Color(0,0,0,100));
+    	g.fillRect((int)cam.x,(int)cam.y, appWidth, 20);
+    	g.fillRect((int)cam.x, (int)cam.y+appHeight-40, appWidth, 20);
+    	g.setColor(Color.green);
+    	for(int i=0;i<player.health;i++){
+    		g.drawImage(healthSprite.sprite, (int)cam.x+i*20,(int)cam.y-10 , null);
+    	}
+    	
+    	g.drawRect((int)cam.x+(appWidth/2)-50,(int)cam.y, 100, 20);
+    	for(int i=0;i<player.getEquippedWeapon().getCharge();++i){
+    		g.fillRect((int)cam.x+(appWidth/2)-50+(i*20),(int)cam.y, 20, 20);
+    	}
+    	
+    }
+    
+    private void renderDialogue(Graphics g){
+    	if(bossSign){  	
+    		Vector2f pos = getViewportTransform().mul(player.position);
+    		g.setColor(new Color(0,0,0,200));
+    		String str = "He who approaches shall bow to my will!!!";
+    		g.fillRect((int)pos.x-(275/2), (int)pos.y+90, 275 , 30);
+    		g.setColor(Color.WHITE);
+    		g.drawString(str, (int)pos.x+2-(275/2), (int)pos.y+110);
+    	}
+    	
+    	if(startSign){  	
+    		Vector2f pos = getViewportTransform().mul(player.position);
+    		g.setColor(new Color(0,0,0,200));
+    		String str = "Welcome to Sulis!";
+    		g.fillRect((int)pos.x-(275/2), (int)pos.y+90, 275 , 30);
+    		g.setColor(Color.WHITE);
+    		g.drawString(str, (int)pos.x+2-(275/2), (int)pos.y+110);
+    	}
+    	
+    	if(bridgeSign){  	
+    		Vector2f pos = getViewportTransform().mul(player.position);
+    		g.setColor(new Color(0,0,0,200));
+    		String str = "The evil Zelroth has taken over!";
+    		g.fillRect((int)pos.x-(275/2), (int)pos.y+90, 250 , 30);
+    		g.setColor(Color.WHITE);
+    		g.drawString(str, (int)pos.x+2-(275/2), (int)pos.y+110);
+    	}
+    	
+    }
+    
+    private void renderLasers(Graphics g){
+    	for(int i=0;i<lasers.size();++i){
+    		lasers.get(i).render(g, getViewportTransform());
+    	}
+    }
+    
+    private void renderEnemies(Graphics g){
+    	for(int i=0;i<enemies.size();++i){
+    		enemies.get(i).render(g, getViewportTransform());
+    	}
+    }
+
+
+    @Override
+    protected void terminate() {
+        super.terminate();
+        shutDownClips();
+    }
+
+    public static void main(String[] args) {
+        launchApp(new WorldSpace());
+    }
+}

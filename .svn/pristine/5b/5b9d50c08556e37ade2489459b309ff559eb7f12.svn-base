@@ -1,0 +1,21 @@
+package javagames.gameobjects;
+
+import javagames.main.WorldSpace.player;
+import javagames.util.Vector2f;
+
+public class Boss extends Enemy{
+	
+	public player p;
+	
+	public Boss(Vector2f p){
+		super(p);
+		this.p = player.BOSS;
+		this.shotCooldown = 0.1f;
+		health = 50;
+	}
+	//tornado
+	
+	//shoot huge laser
+	
+	//homing laser
+}

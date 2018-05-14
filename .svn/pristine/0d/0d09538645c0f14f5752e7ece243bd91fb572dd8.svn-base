@@ -1,0 +1,12 @@
+package javagames.gameobjects;
+
+import javagames.main.WorldSpace.Actor;
+
+public class HomingBullet extends Bullet {
+
+	public HomingBullet(float angle, float x, float y, float ba, float bl, Actor p) {
+		super(angle, x, y, ba, bl, p);
+		// TODO Auto-generated constructor stub
+	}
+
+}

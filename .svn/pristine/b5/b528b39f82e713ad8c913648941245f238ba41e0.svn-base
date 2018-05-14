@@ -1,0 +1,69 @@
+package javagames.gameobjects;
+
+import java.awt.RenderingHints;
+import java.io.IOException;
+
+import javax.imageio.ImageIO;
+
+import javagames.main.WorldSpace.Actor;
+import javagames.util.BoundingCircle;
+import javagames.util.Vector2f;
+
+public class Boss extends Enemy{
+	
+	public enum Attack{ TORNADO, BIGBULLET, HOMINGLASER }
+	public Attack attack;
+	
+	public Boss(Vector2f p){
+		super(p);
+		this.p = Actor.BOSS;
+		this.shotCooldown = 0.1f;
+		health = 40;
+		createLaserAnims();
+		equippedWeapon = new Weapon(0,0,0);
+		boundingCircle = new BoundingCircle(new Vector2f(0.0f, 1.0f), position);
+		attack = Attack.TORNADO; 
+		equippedWeapon.barrelLoc = 1.0f;
+	}
+	
+	private void createLaserAnims(){
+		try {
+	           sprite = ImageIO.read(this.getClass().getResource("/actors/boss.png"));
+	           sprite = scaleWithGraphics(RenderingHints.VALUE_INTERPOLATION_BILINEAR, sprite,4);
+	       }
+	       catch (IOException e){
+	           e.printStackTrace();
+	           sprite = null;
+	       }
+	}
+	
+	public void updateWorld(float delta, Vector2f player) {
+		
+		
+		if( attack == Attack.TORNADO){
+			
+			frameDelay = 10;
+			shotCooldown = 0;
+			isShooting = true;
+			//update angle
+			angle += 30 * delta;
+			if( time > 3 )
+			{
+				attack = Attack.BIGBULLET;
+				time = 0;
+			}
+			
+		}
+		super.updateWorld(delta, player);
+		if( attack == Attack.BIGBULLET ){
+			frameDelay = .5f;
+			shotCooldown = 2;
+			isShooting = true;
+		}
+	}
+	
+	
+	//shoot huge laser
+	
+	//homing laser
+}
